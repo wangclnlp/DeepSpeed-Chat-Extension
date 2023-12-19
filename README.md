@@ -1,4 +1,4 @@
-We have edited the code of the original project [DeepSpeed-Chat](https://github.com/microsoft/DeepSpeedExamples/tree/master/applications/DeepSpeed-Chat) to support many new features(see details in [./examples](./examples)). The following is the original README.md.
+We have edited the code of the project [DeepSpeed-Chat](https://github.com/microsoft/DeepSpeedExamples/tree/master/applications/DeepSpeed-Chat) to support many new features(see details in [./examples](./examples)). The following is the original README.md.
 
 Thanks to the DeepSpeed-Chat project and its contributors❤️!
 
