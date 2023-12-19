@@ -74,8 +74,12 @@ deepspeed ./rlhf_llama/deepspeed_chat/training/step3_rlhf_finetuning/main.py \
    --ppo_mini_epochs 4 \
    --reward_type lex \
    --offload \
-   --dynamic_sampling \
-
+   --add_sft_loss \
+   --add_pretrained_loss \
+   --factor_rl_loss 0.6 \
+   --factor_sft_loss  0.3 \
+   --factor_pretrained_loss 0.1 \
+   &> $OUTPUT/training.log
 
 end_time=`date +%Y%m%d%H%M%S`
 echo ${end_time}
