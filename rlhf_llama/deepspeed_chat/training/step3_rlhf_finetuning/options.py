@@ -323,29 +323,6 @@ def parse_args():
                         action='store_true',
                         help='Enable Dynamic Sampling.')
 
-    ## Iterative Alignment
-    parser.add_argument('--iterative_alignment',
-                        action='store_true',
-                        help='Enable Iteractive Alignment.')
-    parser.add_argument('--previous_sft_model',
-                        type=str,
-                        help='model path of the previous sft model; compute the fisher for EWC.')
-    parser.add_argument('--previous_round_after_sft_model',
-                        type=str,
-                        help='model path of the previous round model after sft.')
-    parser.add_argument('--lamda_factor',
-                        type=float,
-                        default=1.0,
-                        help='rl_loss + ewc_loss * lamda_factor')
-    parser.add_argument('--ewc_max_weight',
-                        type=float,
-                        default=100.0,
-                        help='Set max weight in  EWC.')
-    parser.add_argument('--ewc_mse_factor',
-                    type=float,
-                    default=1e10,
-                    help='(sft_model-previous_sft_model).mean()*ewc_mse_factor')
-
     ## Add SFT loss
     parser.add_argument('--add_sft_loss',
                         action='store_true',

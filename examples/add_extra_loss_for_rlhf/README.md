@@ -1,4 +1,4 @@
-# Add extra loss
+# Step3: Add extra loss for rlhf
 
 👉 **The ``--add_sft_loss`` argument**
 

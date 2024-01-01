@@ -1,4 +1,4 @@
-# Direct Preference Optimization: Your Language Model is Secretly a Reward Model
+# Step2: Direct Preference Optimization: Your Language Model is Secretly a Reward Model
 
 paper: https://arxiv.org/abs/2305.18290
 

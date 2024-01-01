@@ -1,4 +1,4 @@
-# ESRL: Efficient Sampling-based Reinforcement Learning for Sequence Generation
+# Step3: ESRL: Efficient Sampling-based Reinforcement Learning for Sequence Generation
 
 paper: https://arxiv.org/abs/2308.02223
 
