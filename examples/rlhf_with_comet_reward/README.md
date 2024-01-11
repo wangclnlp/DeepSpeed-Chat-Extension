@@ -1,4 +1,4 @@
-# Step3: Learning Evaluation Models from Large Language Models for Sequence Generation
+# Learning Evaluation Models from Large Language Models for Sequence Generation (in Step3)
 
 paper: https://arxiv.org/abs/2308.04386
 
@@ -20,9 +20,9 @@ We added this argument for setting the weight for each comet model.
 
 👉 **The ``--devices_comet_model`` argument**
 
-We added this argument for setting the cuda device for each comet model. Hint: we can set same device for all comet models.
+We added this argument for setting the cuda device for each comet model. Hint: we can set the same device for all comet models.
 
-## How to train the model
+## How to Train the Model
 
 ```bash
 bash examples/comet_reward/train.sh

@@ -1,12 +1,12 @@
 We have edited the code of project [DeepSpeed-Chat](https://github.com/microsoft/DeepSpeedExamples/tree/master/applications/DeepSpeed-Chat) to support many new features as shown below.
 
-# Our new features🎉🎉🎉
+# Our New Features🎉🎉🎉
 
-- Add extra loss for rlhf in step3 like sft loss and pretrained loss.
-- Support [DPO](https://arxiv.org/abs/2305.18290) as step2.
-- Implement [ESRL](https://arxiv.org/abs/2308.02223) feature to train efficiently in step3.
-- Support COMET model(s) as reward model(s) in step3 RLHF.
-- Support using scores to train reward models directly.
+- Add extra loss for RLHF in step3 like SFT loss and pre-trained loss ([./examples/add_extra_loss_for_rlhf](./examples/add_extra_loss_for_rlhf)).
+- Support [DPO](https://arxiv.org/abs/2305.18290) as step2 ([./examples/dpo](./examples/dpo)).
+- Implement [ESRL](https://arxiv.org/abs/2308.02223) features to train efficiently in step3 ([./examples/esrl](./examples/esrl)).
+- Support COMET model(s) as reward model(s) in step3 RLHF ([./examples/rlhf_with_comet_reward](./examples/rlhf_with_comet_reward)).
+- Support using scores instead of pairwise data only to train reward models directly ([./examples/training_reward_with_scores](./examples/training_reward_with_scores)).
 
 More details in [./examples](./examples).
 
@@ -20,37 +20,47 @@ conda activate dschat
 pip install -r requirements.txt
 ```
 
-# Training models
+# Training Models
 
-## Step 1 Supervised Fine-tuning (SFT)
+## Step1 Supervised Fine-tuning (SFT)
 
 ```bash
 bash scripts/sft.sh
 ```
 
-## Step 2 Reward Model Fine-tuning
+## Step2 Reward Model Fine-tuning
 
 ```bash
 bash scripts/reward.sh
 ```
 
-## Step 2 Direct Pereference Optimization (DPO)
+## Step2 Direct Pereference Optimization (DPO)
 
 ```bash
 bash examples/dpo/train.sh
 ```
 
-## Step 3 Reinforcement Learning from Human Feedback (RLHF)
+## Step3 Reinforcement Learning from Human Feedback (RLHF)
 
 ```bash
 bash scripts/rlhf.sh
 ```
 
-# Format of the dataset
+# Supported Models
+
+| Model | Model size |
+|:---:|:---:|
+| Baichuan | 7B/13B |
+| Baichuan2 | 7B/13B |
+| LLaMA | 7B/13B/33B/65B |
+| LLaMA-2 | 7B/13B/70B |
+| Yi | 6B/34B |
+
+# Format of the Dataset
 
 ## SFT
 
-Dataset for SFT should be `txt` files including `train.txt` and `test.txt`  with `sft` in path such as `/your/path/to/sft_dataset/train.txt`, containing a json string each line as example below.
+The dataset for SFT should be `txt` files including `train.txt` and `test.txt`  with `sft` in path such as `/your/path/to/sft_dataset/train.txt`, containing a json string each line as example below.
 
 Example:
 
@@ -59,9 +69,9 @@ Example:
 ...
 ```
 
-## DPO/Reward
+## Reward/DPO
 
-Dataset for Reward/DPO should be parquet files including `train.parquet` and `test.parquet` with `reward` in path such as `/your/path/to/reward_dataset/train.parquet`, containing four keys each entry as example below.
+The dataset for Reward/DPO should be parquet files including `train.parquet` and `test.parquet` with `reward` in path such as `/your/path/to/reward_dataset/train.parquet`, containing four keys each entry as example below.
 
 Example:
 
@@ -75,6 +85,6 @@ Example:
 
 Same as SFT, except for `rlhf` in path such as `/your/path/to/rlhf_dataset/train.txt`.
 
-# Last but not least
+# Last but Not Least
 
 Thanks to the [DeepSpeed-Chat](https://github.com/microsoft/DeepSpeedExamples/tree/master/applications/DeepSpeed-Chat) project and its contributors❤️❤️❤️!

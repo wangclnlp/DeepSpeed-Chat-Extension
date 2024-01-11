@@ -337,15 +337,15 @@ def parse_args():
     ## Factor of sft loss and rl loss
     parser.add_argument('--factor_rl_loss',
                         type=float,
-                        default=0,
+                        default=0.7,
                         help='factor_rl_loss*loss_rl if add_sft_loss or add_pretrained_loss')
     parser.add_argument('--factor_sft_loss',
                         type=float,
-                        default=0,
+                        default=0.15,
                         help='+= factor_sft_loss*loss_sft if add_sft_loss')
     parser.add_argument('--factor_pretrained_loss',
                         type=float,
-                        default=0,
+                        default=0.15,
                         help='+= factor_pretrained_loss*loss_pretrained if add_pretrained_loss')
 
     ## use the annotated scores to training the reward model. Note: argment confiting, don't set it!

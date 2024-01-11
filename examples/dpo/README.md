@@ -1,8 +1,8 @@
-# Step2: Direct Preference Optimization: Your Language Model is Secretly a Reward Model
+# Step2 Direct Preference Optimization: Your Language Model is Secretly a Reward Model
 
 paper: https://arxiv.org/abs/2305.18290
 
-## Format of the data
+## Format of the Data
 
 The dataset for DPO is the same as that for training reward model, which should be parquet files including `train.parquet` and `test.parquet` as example below.
 
@@ -15,7 +15,7 @@ Example:
 | ... | ... | ... | ... |
 
 
-## How to train the model
+## How to Train the Model
 
 ```bash
 bash examples/dpo/train.sh

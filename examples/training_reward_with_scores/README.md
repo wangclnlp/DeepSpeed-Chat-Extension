@@ -1,4 +1,4 @@
-# Step2: Training reward model with scores
+# Training Reward Model with Scores (in Step2)
 
 👉 **The ``--disable_dropout`` argument**
 
@@ -8,7 +8,7 @@ Disable the dropout of the model.
 
 Use GPT-annotated scores to train the reward model.
 
-## Format of the data
+## Format of the Data
 
 The dataset for training reward model should be parquet files including `train.parquet` and `test.parquet`.
 
@@ -22,7 +22,7 @@ Example:
 | User: Looking for an essay by a contemporary m... | I believe you're thinking of Bernard-Henri Lévy. | I believe you're thinking of Bernard-Henri Lévy. | 0.8 | Laclau maybe? | 0.2 |
 | ... | ... | ... | ... | ... | ... |
 
-## How to train the model
+## How to Train the Model
 
 ```bash
 bash examples/training_reward_with_scores/train.sh

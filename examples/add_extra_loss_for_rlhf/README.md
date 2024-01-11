@@ -1,26 +1,26 @@
-# Step3: Add extra loss for rlhf
+# Add Extra Loss for RLHF (in Step3)
 
 👉 **The ``--add_sft_loss`` argument**
 
-We added this argument for adding SFT loss.
+Add SFT loss, loss will add `factor_sft_loss * loss_sft`, which means `loss += factor_sft_loss * loss_sft`.
 
 👉 **The ``--add_pretrained_loss`` argument**
 
-We added this argument for adding pretrained loss.
+Add pre-trained loss, loss will add `factor_pretrained_loss * loss_pretrained`, which means `loss += factor_pretrained_loss * loss_pretrained`.
 
 👉 **The ``--factor_rl_loss`` argument**
 
-Loss will be `factor_rl_loss * loss_rl` if `add_sft_loss` or `add_pretrained_loss`
+Defaults to 0.7, `rl_loss` will be multipied by `factor_rl_loss` if `add_sft_loss` or `add_pretrained_loss`, which means `loss = factor_rl_loss*rl_loss + factor_sft_loss*loss_sft(when add_sft_loss) + factor_pretrained_loss*loss_pretrained(when add_pretrained_loss)`.
 
 👉 **The ``--factor_sft_loss`` argument**
 
-Loss will be added by `factor_sft_loss * loss_sft` if `add_sft_loss`
+Defaults to 0.15.
 
 👉 **The ``--factor_pretrained_loss`` argument**
 
-Loss will be added by `factor_pretrained_loss * loss_pretrained` if `add_pretrained_loss`
+Defaults to 0.15.
 
-## How to train the model
+## How to Train the Model
 
 ```bash
 bash examples/add_extra_loss/train.sh

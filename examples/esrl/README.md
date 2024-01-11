@@ -1,12 +1,12 @@
-# Step3: ESRL: Efficient Sampling-based Reinforcement Learning for Sequence Generation
+# ESRL: Efficient Sampling-based Reinforcement Learning for Sequence Generation (in Step3)
 
 paper: https://arxiv.org/abs/2308.02223
 
 👉 **The ``--dynamic_sampling`` argument**
 
-We added this argument for enabling the feather of ESRL in the above paper.
+We added this argument for enabling the features of ESRL in the above paper.
 
-## How to train the model
+## How to Train the Model
 
 ```bash
 bash examples/esrl/train.sh
