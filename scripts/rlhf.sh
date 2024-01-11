@@ -70,11 +70,9 @@ deepspeed ./rlhf_llama/deepspeed_chat/training/step3_rlhf_finetuning/main.py \
    --actor_zero_stage $ACTOR_ZERO_STAGE \
    --critic_zero_stage $CRITIC_ZERO_STAGE \
    --output_dir $OUTPUT \
-   --dtype bf16 \
    --ppo_mini_epochs 4 \
    --reward_type lex \
    --offload \
-   --dynamic_sampling \
    &> $OUTPUT/training.log
 
 end_time=`date +%Y%m%d%H%M%S`

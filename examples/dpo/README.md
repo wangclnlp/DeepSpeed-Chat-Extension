@@ -18,7 +18,7 @@ Example:
 ## How to train the model
 
 ```bash
-bash examples/DPO/train.sh
+bash examples/dpo/train.sh
 ```
 
 ## Citation

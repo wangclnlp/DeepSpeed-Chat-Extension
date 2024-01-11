@@ -51,7 +51,6 @@ deepspeed ./rlhf_llama/deepspeed_chat/training/step2_reward_model_finetuning/mai
    --deepspeed \
    --gradient_checkpointing \
    --output_dir $OUTPUT \
-   --gpt_annotated_score True \
    &> $OUTPUT/training.log
 
 end_time=`date +%Y%m%d%H%M%S`

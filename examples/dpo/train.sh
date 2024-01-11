@@ -34,7 +34,7 @@ deepspeed ./rlhf_llama/deepspeed_chat/training/step2_dpo_finetuning/main.py \
    --data_split 0,1,0 \
    --model_name_or_path $MODEL_PATH \
    --data_output_path $DATA_CACHE \
-	 --per_device_train_batch_size 4 \
+   --per_device_train_batch_size 4 \
    --per_device_eval_batch_size 4 \
    --max_seq_len 512 \
    --learning_rate 1e-6 \

@@ -82,7 +82,8 @@ deepspeed ./rlhf_llama/deepspeed_chat/training/step3_rlhf_finetuning/main.py \
    --comet_model_batch_size 1 \
    --reward_type seq \
    --add_sft_loss \
-   --remove_critic_model
+   --remove_critic_model \
+   &> $OUTPUT/training.log
 
 end_time=`date +%Y%m%d%H%M%S`
 echo ${end_time}
