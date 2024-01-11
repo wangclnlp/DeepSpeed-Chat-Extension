@@ -5,8 +5,8 @@ We have edited the code of project [DeepSpeed-Chat](https://github.com/microsoft
 - Add extra loss for rlhf in step3 like sft loss and pretrained loss.
 - Support [DPO](https://arxiv.org/abs/2305.18290) as step2.
 - Implement [ESRL](https://arxiv.org/abs/2308.02223) feature to train efficiently in step3.
-- Support COMET model(s) as the reward(s) in step3 RLHF.
-- Support to use scores to train reward models directly.
+- Support COMET model(s) as reward model(s) in step3 RLHF.
+- Support using scores to train reward models directly.
 
 More details in [./examples](./examples).
 
@@ -50,7 +50,9 @@ bash scripts/rlhf.sh
 
 ## SFT
 
-Data for SFT should be a txt file, containing a json string each line.
+Dataset for SFT should be `txt` files including `train.txt` and `test.txt`  with `sft` in path such as `/your/path/to/sft_dataset/train.txt`, containing a json string each line as example below.
+
+Example:
 
 ```
 {"instruction": "User: Your task is to ... \nAssistant: ", "input": "...", "output": "..."}
@@ -59,7 +61,7 @@ Data for SFT should be a txt file, containing a json string each line.
 
 ## DPO/Reward
 
-The dataset for reward should be parquet files including `train.parquet` and `test.parquet` as example below.
+Dataset for Reward/DPO should be parquet files including `train.parquet` and `test.parquet` with `reward` in path such as `/your/path/to/reward_dataset/train.parquet`, containing four keys each entry as example below.
 
 Example:
 
@@ -71,7 +73,7 @@ Example:
 
 ## RLHF
 
-Same as SFT.
+Same as SFT, except for `rlhf` in path such as `/your/path/to/rlhf_dataset/train.txt`.
 
 # Last but not least
 
