@@ -85,6 +85,27 @@ Example:
 
 Same as SFT, except for `rlhf` in path such as `/your/path/to/rlhf_dataset/train.txt`.
 
+# Inference
+
+You can use [this](rlhf_llama/deepspeed_chat/training/step1_supervised_finetuning/predict.py) python script for inference as shown in [`./scripts/predict.sh`](./scripts/predict.sh) in which the input should be in format of `{Input} ||| {None/Reference}` while output would be `{Input} ||| {ModelOutput} ||| {None/Reference}` as example below.
+
+Example:
+
+input.txt
+```
+User: What are the names of some famous actors ...\nAssistant: ||| Some famous ...
+User: ...                                                      ||| None
+...                                                            ||| ...
+```
+
+output.txt
+```
+User: What are the names of some famous actors ...\nAssistant: ||| 1. Denzel Washington ... ||| Some famous ...
+User: ...                                                      ||| ...                      ||| None
+...                                                            ||| ...                      ||| ...
+```
+
+
 # Last but Not Least
 
 Thanks to the [DeepSpeed-Chat](https://github.com/microsoft/DeepSpeedExamples/tree/master/applications/DeepSpeed-Chat) project and its contributors❤️❤️❤️!
