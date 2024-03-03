@@ -44,12 +44,16 @@ def gather_log_probs(logits, labels):
     return log_probs_labels.squeeze(-1)
 
 # from alpaca_farm: https://github.com/tatsu-lab/alpaca_farm/blob/b17d605a360fc2936cbe6ee89e81d7270b440903/src/alpaca_farm/torch_ops.py#L61C3-L61C3
-def whiten(values, shift_mean=True, epsilon=1e-8):
-    assert values.size(0) >= 4, f"Internal error: Minibatch size {values.size(0)} is insufficient for whitening."
-    mean, std = values.mean(), values.std(unbiased=False)
+def whiten(values, shift_mean=True, epsilon=1e-8, value_queue=None):
+    # assert values.size(0) >= 4, f"Internal error: Minibatch size {values.size(0)} is insufficient for whitening."
+    if value_queue != None:
+        mean, std = value_queue.mean(), value_queue.std(unbiased=False)
+    else:
+        mean, std = values.mean(), values.std(unbiased=False)
     whitened = (values - mean) / (std + epsilon)
     if not shift_mean:
         whitened = whitened + mean
+
     return whitened
 
 class DeepSpeedPPOTrainer():
@@ -62,7 +66,11 @@ class DeepSpeedPPOTrainer():
         if args.iterative_alignment: self.ewc = self.rlhf_engine.ewc
         self.reward_model = self.rlhf_engine.reward
         self.tokenizer = self.rlhf_engine.tokenizer
-        self.reward_tokenizer = self.rlhf_engine.reward_tokenizer
+        if not args.use_comet_model:
+            self.reward_tokenizer = self.rlhf_engine.reward_tokenizer
+        else:
+            self.reward_tokenizer = None
+
         self.args = args
         self.max_answer_seq_len = args.max_answer_seq_len
         # self.end_of_conversation_token_id = self.tokenizer(
@@ -73,7 +81,7 @@ class DeepSpeedPPOTrainer():
         self.clip_reward_value = 10
         self.cliprange = 0.2
         self.cliprange_value = 0.2
-        self.gamma = 1.0
+        self.gamma = args.gamma
         self.lam = 0.95
 
         # some attributes for reward queue approach.
@@ -83,7 +91,21 @@ class DeepSpeedPPOTrainer():
             self.batch_reward_weight= args.batch_reward_weight
             self.cold_boot_count = 0
             self.cold_boot_mode = True
-    
+
+        # queue for whitening reward and value
+        if self.args.whiten_rewards:
+            saved_reward_whiten_queue = f"{self.args.previous_round_after_rlhf_model}/previous_reward_whiten_queue.bin"
+            if os.path.exists(saved_reward_whiten_queue):
+                self.reward_whiten_queue = torch.load(saved_reward_whiten_queue).to(self.reward_model.device)
+            else:
+                self.reward_whiten_queue = torch.tensor([]).to(self.reward_model.device)
+        if self.args.whiten_critic_values:
+            saved_advantage_whiten_queue = f"{self.args.previous_round_after_rlhf_model}/previous_advantage_whiten_queue.bin"
+            if os.path.exists(saved_advantage_whiten_queue):
+                self.advantage_whiten_queue = torch.load(saved_advantage_whiten_queue).to(self.reward_model.device)
+            else:
+                self.advantage_whiten_queue = torch.tensor([]).to(self.reward_model.device)
+
     def update_reward_queue(self, rewards, if_return_coefficient_uncertainty=False, batch_level=True):
         # reuse the function from llama efficienct tunning framework
         # rewards [reward_1_score, reward_2_score,..., reward_n_score]  reward_1_score: [0.1, 0.5, ..., 0.8]
@@ -104,7 +126,7 @@ class DeepSpeedPPOTrainer():
                     self.reward_queue[reward_index] = tmp_reward_queue
                 else:
                     self.reward_queue[reward_index] = tmp_reward_queue[len(tmp_reward_queue)-self.reward_queue_size:]
-        
+
             if if_return_coefficient_uncertainty:
                 # compute the coefficient matrix
                 coefficient = [[] for i in range(len(rewards))]
@@ -114,10 +136,10 @@ class DeepSpeedPPOTrainer():
                         coefficient_tmp = np.corrcoef(self.reward_queue[reward_i], self.reward_queue[reward_j])[0, 1]
                         coefficient[reward_i].append(coefficient_tmp)
                         coefficient[reward_j].append(coefficient_tmp)
-                    
+
                     ret[f"reward_{reward_i}"] = [np.mean(coefficient[reward_i]), np.std(self.reward_queue[reward_i])]
                 ret[f"reward_{len(rewards)-1}"] = [np.mean(coefficient[-1]), np.std(self.reward_queue[-1])]
-                
+
                 return ret
         else:
             batch_size = len(rewards[-1])
@@ -226,7 +248,7 @@ class DeepSpeedPPOTrainer():
             return out_seq, sft_input_after_drop
         else:
             return out_seq
- 
+
     def generate_experience(self, prompts, mask, sft_input=None):
         self.eval()
         if self.args.use_comet_model and self.args.add_sft_loss:
@@ -249,7 +271,7 @@ class DeepSpeedPPOTrainer():
 
             # concatenate the sampled sequence and the reference sequence.  [sampled sequences, reference sequences]
             # So, when using the reference-based comet model, maybe the score of the reference is equal to 1.
-            if self.args.add_sft_loss and self.args.update_reference_with_sampling:  
+            if self.args.add_sft_loss and self.args.update_reference_with_sampling:
                 prompts_string += prompts_string
                 ans_string += ref_string
                 ref_string += ref_string
@@ -259,80 +281,88 @@ class DeepSpeedPPOTrainer():
             # step 1: preprocess input based the prompts_string and the ans_strining.
             reference_based_input = []
             reference_free_input = []
-            
+
             for s, r, t in zip(prompts_string, ref_string, ans_string):
                 reference_based_input.append({"src": s, "ref":r, "mt": t})
-            
+
             for s, t in zip(prompts_string, ans_string):
                 reference_free_input.append({"src": s, "mt": t})
 
             # step 2: run forward of comet models to obtain reward scores.
             for comet_model in self.reward_model:
-                if comet_model.require_reference:
+                if self.args.comet_model_require_reference:
                     score = comet_model.predict(reference_based_input, batch_size=self.args.comet_model_batch_size,
-                                                 gpus=1, progress_bar = False, num_workers=0).scores
+                                                 gpus=1, progress_bar = False, num_workers=0, devices=[seq.device.index]).scores
                 else:
-                    score = comet_model.predict(reference_based_input, batch_size=self.args.comet_model_batch_size,
-                                                 gpus=1, progress_bar = False, num_workers=0).scores
+                    score = comet_model.predict(reference_free_input, batch_size=self.args.comet_model_batch_size,
+                                                 gpus=1, progress_bar = False, num_workers=0, devices=[seq.device.index]).scores
                 rewards.append(score)
 
-            # step 3: update the reward queue.
-            if self.cold_boot_count > self.reward_queue_size:
-                self.cold_boot_mode = False
+            # # step 3: update the reward queue.
+            # if self.cold_boot_count > self.reward_queue_size:
+            #     self.cold_boot_mode = False
 
-            if self.cold_boot_mode:
-                self.update_reward_queue(rewards, if_return_coefficient_uncertainty=False)
-                self.cold_boot_count += len(rewards[-1])
-            else:
-                reward_corr_std = self.update_reward_queue(rewards, if_return_coefficient_uncertainty=True, batch_level=self.batch_reward_weight)
-                # the content of reward_corr_std is: {'reward_0': [1.0, 0.5962855097896772], 'reward_1': [1.0, 0.5962855097896772]}
-                # fist of the list is the mean of coefficient of association, range in [-1, 1], the second of the list is the standard deviation of reward queue, range in [0,1]
+            # if self.cold_boot_mode:
+            #     self.update_reward_queue(rewards, if_return_coefficient_uncertainty=False)
+            #     self.cold_boot_count += len(rewards[-1])
+            # else:
+            #     reward_corr_std = self.update_reward_queue(rewards, if_return_coefficient_uncertainty=True, batch_level=self.batch_reward_weight)
+            #     # the content of reward_corr_std is: {'reward_0': [1.0, 0.5962855097896772], 'reward_1': [1.0, 0.5962855097896772]}
+            #     # fist of the list is the mean of coefficient of association, range in [-1, 1], the second of the list is the standard deviation of reward queue, range in [0,1]
 
-            # step 4: using it to show our fancy approaches!
-            if self.cold_boot_mode:
-                combined_rewards = []
-                for sample_index in range(len(rewards[-1])):
-                        tmp_reward_score = 0
-                        for reward_index in range(len(rewards)):
-                            tmp_reward_score += 1/len(rewards)*rewards[reward_index][sample_index]
-                        combined_rewards.append(tmp_reward_score)
-            else:
-                if self.batch_reward_weight:
-                    weight_reward = [reward_corr_std[reward_id][0]*(1/2-reward_corr_std[reward_id][1]) for reward_id in reward_corr_std.keys()]
-                    combined_rewards = []
-                    for sample_index in range(len(rewards[-1])):
-                        tmp_reward_score = 0
-                        for reward_index in range(len(rewards)):
-                            tmp_reward_score += weight_reward[reward_index]*rewards[reward_index][sample_index]
-                        combined_rewards.append(tmp_reward_score)
+            # # step 4: using it to show our fancy approaches!
+            # if self.cold_boot_mode:
+            #     combined_rewards = []
+            #     for sample_index in range(len(rewards[-1])):
+            #             tmp_reward_score = 0
+            #             for reward_index in range(len(rewards)):
+            #                 tmp_reward_score += 1/len(rewards)*rewards[reward_index][sample_index]
+            #             combined_rewards.append(tmp_reward_score)
+            # else:
+            #     if self.batch_reward_weight:
+            #         weight_reward = [reward_corr_std[reward_id][0]*(1/2-reward_corr_std[reward_id][1]) for reward_id in reward_corr_std.keys()]
+            #         combined_rewards = []
+            #         for sample_index in range(len(rewards[-1])):
+            #             tmp_reward_score = 0
+            #             for reward_index in range(len(rewards)):
+            #                 tmp_reward_score += weight_reward[reward_index]*rewards[reward_index][sample_index]
+            #             combined_rewards.append(tmp_reward_score)
 
+            #     else:
+            #         combined_rewards = []
+            #         for sample_index in range(len(rewards[-1])):
+            #             tmp_reward_score = 0
+            #             for reward_index in range(len(rewards)):
+            #                 tmp_reward_score += reward_corr_std[f"reward_{reward_index}"][sample_index][0]*(1/2-
+            #                                     reward_corr_std[f"reward_{reward_index}"][sample_index][1])*rewards[reward_index][sample_index]
+            #             combined_rewards.append(tmp_reward_score)
+
+            reward_score = rewards[0]
+
+            # compute actor logits and critic values for the sampled sequence
+            with torch.no_grad():
+                output = self.actor_model(seq, attention_mask=attention_mask)
+                if not self.args.remove_kl_penalty:
+                    output_ref = self.ref_model(seq, attention_mask=attention_mask)
+
+                if self.args.reward_type == "lex":
+                    if not self.args.remove_critic_model:
+                        values = self.critic_model.forward_value(
+                                seq, attention_mask, return_value_only=True).detach()[:, :-1]
+                    else:
+                        values = None
                 else:
-                    combined_rewards = []
-                    for sample_index in range(len(rewards[-1])):
-                        tmp_reward_score = 0
-                        for reward_index in range(len(rewards)):
-                            tmp_reward_score += reward_corr_std[f"reward_{reward_index}"][sample_index][0]*(1/2-
-                                                reward_corr_std[f"reward_{reward_index}"][sample_index][1])*rewards[reward_index][sample_index]
-                        combined_rewards.append(tmp_reward_score)
-            
-            reward_score = combined_rewards
-
-            # after queue 
-            # rewards = torch.Tensor(rewards).T.to(prompts.device)
-
-            output = self.actor_model(seq, attention_mask=attention_mask)
-            if not self.args.remove_kl_penalty:
-                output_ref = self.ref_model(seq, attention_mask=attention_mask)
+                    values = None
 
         else:
             if self.reward_tokenizer is not None:
                 prompts_string = self.tokenizer.batch_decode(prompts, skip_special_tokens=True)
-                
+
                 seq_string = self.tokenizer.batch_decode(seq, skip_special_tokens=True)
                 # concatenate the sampled sequence and the reference sequence.  [sampled sequences, reference sequences]
-                if self.args.add_sft_loss and self.args.update_reference_with_sampling:  
+                if self.args.add_sft_loss and self.args.update_reference_with_sampling:
                     ref_string = self.tokenizer.batch_decode(sft_input_after_drop["sft_input_ids"], skip_special_tokens=True)
-                    seq_string += ref_string 
+                    seq_string += ref_string
 
                 reward_seq = self.reward_tokenizer(seq_string, padding=True, return_tensors="pt")["input_ids"]
                 reward_attention_mask  = reward_seq.not_equal(self.reward_tokenizer.pad_token_id).long()
@@ -348,11 +378,12 @@ class DeepSpeedPPOTrainer():
                     output_ref = self.ref_model(seq, attention_mask=attention_mask)
                 # compute reward score
                 reward_score = self.reward_model.forward_value(    # tensor(s_{1}, s_{2}, ..., s{n}), where n is the number of sequences.
-                    reward_seq, reward_attention_mask,  
+                    reward_seq, reward_attention_mask,
                     prompt_length=self.prompt_length)['chosen_end_scores'].detach()
                 if self.args.shuffle_reward_score_randomly:
                     shuffle_index = torch.randperm(len(reward_score))
                     reward_score = reward_score[shuffle_index]
+
                 if self.args.reward_type == "lex":
                     if not self.args.remove_critic_model:
                         values = self.critic_model.forward_value(
@@ -365,16 +396,16 @@ class DeepSpeedPPOTrainer():
         logits = output.logits
         if not self.args.remove_kl_penalty:
             logits_ref = output_ref.logits
- 
+
         # update the reference
         if self.args.add_sft_loss and self.args.update_reference_with_sampling:
-            sequence_num = len(reward_score) 
-            batch_size = sequence_num // 2 
+            sequence_num = len(reward_score)
+            batch_size = sequence_num // 2
             updated_reference = []
 
             if self.args.use_comet_model:
                 for seq_index in range(batch_size):
-                    if sum(reward_score[seq_index]) > sum(reward_score[seq_index+batch_size]): # TODO: replace sum with some fancy approaches 
+                    if sum(reward_score[seq_index]) > sum(reward_score[seq_index+batch_size]): # TODO: replace sum with some fancy approaches
                         updated_reference.append(seq[seq_index])
                     else:
                         updated_reference.append(sft_input["sft_input_ids"][seq_index])
@@ -384,7 +415,7 @@ class DeepSpeedPPOTrainer():
                         updated_reference.append(seq[seq_index])
                     else:
                         updated_reference.append(sft_input["sft_input_ids"][seq_index])
-            
+
             reference_tensor = pad_sequence(updated_reference, padding_value=pad_token_id, batch_first=True)
             reference_tensor_mask = reference_tensor.not_equal(self.tokenizer.pad_token_id).long()
 
@@ -401,7 +432,7 @@ class DeepSpeedPPOTrainer():
             reward_score = reward_score[:batch_size]
 
         #### scale the reward scores with bias
-        reward_score = reward_score + self.args.reward_bias
+        reward_score = torch.Tensor([float(r) + self.args.reward_bias for r in reward_score]).to(logits.device)
 
         if not self.args.remove_critic_model:
             ret = {
@@ -430,7 +461,7 @@ class DeepSpeedPPOTrainer():
                 'input_ids': seq,
                 "attention_mask": attention_mask,
             }
-        
+
         if self.args.add_sft_loss:
             # ret["sft_input_ids"] = sft_input_after_drop["sft_input_ids"]
             # ret["sft_attention_mask"] = sft_input_after_drop["sft_attention_mask"]
@@ -478,7 +509,7 @@ class DeepSpeedPPOTrainer():
             kl_divergence_estimate = -self.kl_ctl * kl
 
             # kl_divergence_estimate = -self.kl_ctl * (log_probs - ref_log_probs).abs()
-            rewards = kl_divergence_estimate
+            kl_rewards = kl_divergence_estimate
             kl_distance = kl_divergence_estimate
 
         start = prompts.shape[1] - 1
@@ -498,24 +529,29 @@ class DeepSpeedPPOTrainer():
 
                 # r-kl_value_token_level (add reward score at last token)
                 for j in range(batch_size):
-                    rewards[j, start:ends[j]][-1] += reward_clip[j]
+                    kl_rewards[j, start:ends[j]][-1] += reward_clip[j]
             else:
                 add_last_token = False
                 if not add_last_token:
                     # r-kl_value_token_level
                     ret = []
-                    for j in range(batch_size):
-                        ret.append((reward_clip[j]+rewards[j]).tolist())
-                    return torch.Tensor(ret).to(reward_clip.device)
+                    for i in range(batch_size):
+                        seq_reward = reward_clip[i]
+                        for j in range(len(kl_rewards[i])):
+                            seq_reward *= self.gamma
+                            kl_rewards[i][j] += seq_reward
+                        ret.append(kl_rewards[i].tolist())
+                    return torch.Tensor(ret).to(reward_clip.device), torch.abs(kl_distance).mean()
                 else:
                     # r-kl_value_token_level (add reward score at last token)
                     for j in range(batch_size):
-                        rewards[j, start:ends[j]][-1] += reward_clip[j]
+                        kl_rewards[j, start:ends[j]][-1] += reward_clip[j]
+                    return kl_rewards, torch.abs(kl_distance).mean()
         else:
             for j in range(batch_size):
-                rewards[j, start:ends[j]][-1] += reward_clip[j]
+                kl_rewards[j, start:ends[j]][-1] += reward_clip[j]
 
-        return rewards, kl_distance.mean()
+        return kl_rewards, torch.abs(kl_distance).mean()
 
     def train_rlhf(self, inputs, update_critic_only=False):
         # train the rlhf mode here
@@ -552,7 +588,7 @@ class DeepSpeedPPOTrainer():
             old_rewards, kl_distance = self.compute_rewards(prompts, log_probs,
                                                ref_log_probs, reward_score,
                                                action_mask)
-            
+
             ends = start + action_mask[:, start:].sum(1) + 1
 
             # we need to zero out the reward and value after the end of the conversation
@@ -581,12 +617,13 @@ class DeepSpeedPPOTrainer():
             critic_loss = self.critic_loss_fn(value[:, start:], old_values[:,start:],
                                             returns, action_mask[:, start:])
             self.critic_model.backward(critic_loss)
+            self.critic_model.step()
             all_critic_loss.append(critic_loss.item())
             return torch.tensor(0), np.mean(all_critic_loss), old_rewards
 
         for _ in range(self.args.ppo_mini_epochs):
             self.actor_model.zero_grad()
-            
+
             ### process the new outputs
             batch = {'input_ids': seq, "attention_mask": attention_mask}
 
@@ -595,26 +632,26 @@ class DeepSpeedPPOTrainer():
                 value = self.critic_model.forward_value(**batch,
                                                 return_value_only=True,
                                                 use_cache=False)[:, :-1]
-                
+
                 critic_loss = self.critic_loss_fn(value[:, start:], old_values[:,start:],
                                                 returns, action_mask[:, start:])
                 self.critic_model.backward(critic_loss)
                 all_critic_loss.append(critic_loss.item())
-            
+
             # update the actor model
             actor_prob = self.actor_model(**batch, use_cache=False).logits
             actor_log_prob = gather_log_probs(actor_prob[:, :-1, :], seq[:, 1:])
-            
-            
+
+
             actor_loss = self.actor_loss_fn(actor_log_prob[:, start:],
                                             log_probs[:, start:], advantages,
                                             action_mask[:, start:])
-            
+
             ### add sft loss ###
             if self.args.add_sft_loss or self.args.add_pretrained_loss:
                 actor_loss = self.args.factor_rl_loss*actor_loss
-
-            if self.args.add_pretrained_loss:
+                self.actor_model.backward(actor_loss, retain_graph=True)
+            elif self.args.iterative_alignment:
                 self.actor_model.backward(actor_loss, retain_graph=True)
             else:
                 self.actor_model.backward(actor_loss)
@@ -656,7 +693,7 @@ class DeepSpeedPPOTrainer():
             if self.args.align_overflow:
                 actor_overflow = self.actor_model.optimizer.check_overflow(
                     external=True)
-                
+
                 if not self.args.remove_critic_model:
                     critic_overflow = self.critic_model.optimizer.check_overflow(
                         external=True)
@@ -682,17 +719,17 @@ class DeepSpeedPPOTrainer():
                         print_rank_0(
                             "OVERFLOW: overflow, skipping steps",
                             rank)
-                
+
             if not self.args.remove_critic_model:
                 self.critic_model.step()
-            
+
             self.actor_model.step()
 
         if not self.args.remove_critic_model:
             return np.mean(all_actor_loss), np.mean(all_critic_loss), kl_distance
         else:
             return np.mean(all_actor_loss), torch.tensor(0), kl_distance
-        
+
     def get_overflow(self):
         # Overflow is not expected when using bf16
         # Therefore, DeepSpeed's BF16_Optimizer does not maintain an overflow indication
@@ -714,7 +751,7 @@ class DeepSpeedPPOTrainer():
             pg_loss = torch.sum(advantages, dim=-1).view(-1, 1) * ratio
             pg_loss = torch.sum(pg_loss * mask) / mask.sum()
 
-            # slove unclear reward problem: sum(r1*p + r2*p + ... + rn*p). 
+            # slove unclear reward problem: sum(r1*p + r2*p + ... + rn*p).
             # Note: maybe it requires more footprints.  a trick: backward, similar to gradient accumulation
             '''
             model_number = advantages.size(1)
@@ -722,7 +759,7 @@ class DeepSpeedPPOTrainer():
             for i in range(model_number):
                 pg_loss += torch.sum(advantages[:,i].view(-1, 1) * ratio, mask) / mask.sum()
             '''
-            
+
             # slove optimization conflict problem:
 
         elif self.args.remove_critic_model:
@@ -730,15 +767,15 @@ class DeepSpeedPPOTrainer():
             ratio = logprobs
             pg_loss1 = -advantages * ratio
             pg_loss2 = -advantages * torch.clamp(ratio, 1.0 - self.cliprange,
-                                                 1.0 + self.cliprange)
+                                                1.0 + self.cliprange)
             pg_loss = torch.sum(torch.max(pg_loss1, pg_loss2) * mask) / mask.sum()
- 
-        else: 
+
+        else:
             log_ratio = (logprobs - old_logprobs) * mask
             ratio = torch.exp(log_ratio)
             pg_loss1 = -advantages * ratio
             pg_loss2 = -advantages * torch.clamp(ratio, 1.0 - self.cliprange,
-                                                 1.0 + self.cliprange)
+                                                1.0 + self.cliprange)
             pg_loss = torch.sum(torch.max(pg_loss1, pg_loss2) * mask) / mask.sum()
 
         return pg_loss
@@ -758,9 +795,10 @@ class DeepSpeedPPOTrainer():
 
     def get_advantages_and_returns(self, values, rewards, start, reward_type=None):
         # Adopted from https://github.com/CarperAI/trlx/blob/main/trlx/models/modeling_ppo.py#L134
-        # todo: bug, should omit the padding at the end
         if self.args.whiten_rewards:
-            rewards = whiten(rewards, shift_mean=False)
+            tmp_input_queue = rewards[:, start:].reshape(-1)[rewards[:, start:].reshape(-1) != 0]
+            self.reward_whiten_queue = torch.cat((self.reward_whiten_queue, tmp_input_queue))[-self.args.reward_queue_size:]
+            rewards = whiten(rewards, shift_mean=True, value_queue=self.reward_whiten_queue)
 
         if reward_type == None:
             lastgaelam = 0
@@ -773,20 +811,20 @@ class DeepSpeedPPOTrainer():
                 advantages_reversed.append(lastgaelam)
             advantages = torch.stack(advantages_reversed[::-1], dim=1)
             returns = advantages + values[:, start:]
-            advantages = whiten(advantages, shift_mean=True)
+            if self.args.whiten_critic_values:
+                tmp_input_queue = advantages[:, start:].reshape(-1)[advantages[:, start:].reshape(-1) != 0]
+                self.advantage_whiten_queue = torch.cat((self.advantage_whiten_queue, tmp_input_queue))[-self.args.reward_queue_size:]
+                advantages = whiten(advantages, shift_mean=True, value_queue=self.advantage_whiten_queue)
             return advantages.detach(), returns
         else:
-            lastgaelam = 0
             advantages_reversed = []
             length = rewards.size()[-1]
             for t in reversed(range(start, length)):
-                delta = rewards[:, t]
-                lastgaelam = delta
-                advantages_reversed.append(lastgaelam)
+                advantages_reversed.append(rewards[:, t])
             advantages = torch.stack(advantages_reversed[::-1], dim=1)
 
             return advantages.detach()
-        
+
     def _validate_training_mode(self):
         assert self.actor_model.module.training
         if not self.args.remove_critic_model:

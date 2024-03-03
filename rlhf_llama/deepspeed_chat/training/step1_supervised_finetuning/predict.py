@@ -55,13 +55,19 @@ def parse_args():
         "--top_k",
         type=int,
         default=50,
-        help='Specify num of beams',
+        help='Specify num of top_k',
     )
     parser.add_argument(
         "--top_p",
         type=float,
         default=1.0,
-        help='Specify num of beams',
+        help='Specify num of top_p',
+    )
+    parser.add_argument(
+        "--temperature",
+        type=float,
+        default=1.0,
+        help='Specify num of temperature',
     )
     parser.add_argument("--local_rank",
                         type=int,
@@ -115,14 +121,17 @@ def generate(model,
              do_sample=False,
              top_k=50,
              top_p=0.95,
+             temperature=0.75,
              repetition_penalty=1.0,
              num_return_sequences=1,
              max_new_tokens=512):
 
     gen_kwargs = {
-            "top_k": top_k,
+            # "top_k": top_k,
             "top_p": top_p,
             "do_sample": do_sample,
+            # "num_beams": 1,
+            "temperature": temperature,
             "pad_token_id": tokenizer.pad_token_id,
             "max_new_tokens": max_new_tokens,
             "repetition_penalty":repetition_penalty,
@@ -198,9 +207,10 @@ def prompt_eval(args, model, tokenizer, device,
         # print("==========finetune: Multinomial sampling=========")
         res = generate(model, tokenizer, batch,
                                 num_beams=1,
-                                do_sample=True,
+                                do_sample=args.temperature>0,
                                 top_k=args.top_k,
                                 top_p=args.top_p,
+                                temperature=args.temperature,
                                 repetition_penalty=args.penalty_alpha,
                                 num_return_sequences=args.num_return_sequences,
                                 max_new_tokens=args.max_new_tokens)
@@ -260,6 +270,7 @@ def main():
     text = open(args.test_data, "r", encoding="utf-8")
     for line in text:
         line = line.strip().split(" ||| ")
+        print(line)
         references.append(line[1])
         tmp_data.append(line[0])
         sources.append(line[0])
@@ -274,6 +285,8 @@ def main():
 
     if len(tmp_data) != 0:
         prompts = tokenizer(tmp_data, padding=True, return_tensors="pt").to(device)
+        prompts["source"] = sources
+        prompts["reference"] = references
         all_batch.append(prompts)
 
 

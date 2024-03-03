@@ -179,7 +179,7 @@ class RewardModel(nn.Module):
             "chosen_mean_scores": chosen_mean_scores,
             "rejected_mean_scores": rejected_mean_scores,
         }
-
+ 
     def forward_value(self,
                       input_ids=None,
                       attention_mask=None,

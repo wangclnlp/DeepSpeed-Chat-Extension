@@ -143,20 +143,20 @@ def prepare_singlesample_from_dataset(dataset_path,
     tmp_batch = []
     for sample_id, sample_line in enumerate(text):
         sample_line = sample_line.strip().split(" ||| ")
-        sample_content = f"{sample_line[0]} ||| {sample_line[1]} ||| {sample_line[2]}"
-        if len(sample_line) != 3: 
+        sample_content = f"{sample_line[0]} ||| {sample_line[1]}"
+        if len(sample_line) != 2 and sample_line[-1].isdigit(): 
             gpt_label_score = float(sample_line[-1])
 
         if end_of_conversation_token != None:
-            chosen_sentence = sample_line[1] + sample_line[2] + end_of_conversation_token
+            chosen_sentence = sample_line[0] + sample_line[1] + end_of_conversation_token
         else:
-            chosen_sentence = sample_line[1] + sample_line[2]
+            chosen_sentence = sample_line[0] + sample_line[1]
 
         chosen_token = tokenizer(chosen_sentence,
                                  return_tensors="pt")
                 
-        if len(chosen_token["input_ids"]) > max_seq_len-1:
-            continue
+        # if len(chosen_token["input_ids"]) > max_seq_len-1:
+        #     continue
     
         chosen_token = tokenizer(chosen_sentence,
                                 max_length=max_seq_len,
@@ -166,7 +166,7 @@ def prepare_singlesample_from_dataset(dataset_path,
 
         batch = {}
         batch["sample_id"] = sample_id
-        if len(sample_line) != 3:
+        if len(sample_line) != 2 and sample_line[-1].isdigit(): 
             batch["gpt_label_score"] = gpt_label_score
         batch["sample_content"] = sample_content
         batch["input_ids"] = chosen_token["input_ids"]
@@ -180,7 +180,7 @@ def prepare_singlesample_from_dataset(dataset_path,
             new_batch["attention_mask"] = torch.cat([item["attention_mask"] for item in tmp_batch],
                                                 dim=0)
             new_batch["sample_id"] = [item["sample_id"] for item in tmp_batch]
-            if len(sample_line) != 3:
+            if len(sample_line) != 2 and sample_line[-1].isdigit():
                 new_batch["gpt_label_score"] = [item["gpt_label_score"] for item in tmp_batch]
             new_batch["sample_content"] = [item["sample_content"] for item in tmp_batch]
             batchs.append(new_batch)
@@ -193,7 +193,7 @@ def prepare_singlesample_from_dataset(dataset_path,
         new_batch["attention_mask"] = torch.cat([item["attention_mask"] for item in tmp_batch],
                                             dim=0)
         new_batch["sample_id"] = [item["sample_id"] for item in tmp_batch]
-        if len(sample_line) != 3:
+        if "gpt_label_score" in tmp_batch[0].keys(): 
             new_batch["gpt_label_score"] = [item["gpt_label_score"] for item in tmp_batch]
         new_batch["sample_content"] = [item["sample_content"] for item in tmp_batch]
         batchs.append(new_batch)
@@ -262,6 +262,7 @@ def run_single_sample(if_compute_correlation=False):
                                 tokenizer=tokenizer,
                                 max_seq_len=1024)
     all_res = {}
+    all_scores = []
     res_infile = open(args.output_file, "a+", encoding="utf-8")
     remove_colums = ["sample_id", "gpt_label_score", "sample_content"]
     for batch in tqdm(batchs):
@@ -286,13 +287,18 @@ def run_single_sample(if_compute_correlation=False):
         else:
             for id, pre_score, content in zip(sample_id, outputs["chosen_end_scores"], sample_content):
                 all_res[id] = [str(pre_score.item()), content]
+                all_scores.append(pre_score.item())
+
 
         # Writing scores to a file
         for sample_id in all_res.keys():
             res_infile.write(str(sample_id) + " ||| " + " ||| ".join(all_res[sample_id]) + "\n")
+        
             
         all_res = {}
 
+    res_infile.write("Reward Score:" + str(torch.mean(torch.Tensor(all_scores)).item()) + "\n")
+    print("Reward Score:", torch.mean(torch.Tensor(all_scores)).item())
     if if_compute_correlation:
     #compute correlation
         pre_scores = []

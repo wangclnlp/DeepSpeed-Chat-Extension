@@ -111,6 +111,10 @@ def parse_args():
     parser.add_argument('--disable_dropout',
                         action='store_true',
                         help='Disable the dropout of the model.')
+    parser.add_argument("--save_steps",
+                        type=int,
+                        default=-1,
+                        help="Save checkpoint in steps.")
      
     ## Iterative Alignment
     parser.add_argument('--iterative_alignment',
@@ -162,7 +166,25 @@ def parse_args():
                         action='store_true',
                         help='Only optimize the LoRA parameters.')
     parser = deepspeed.add_config_arguments(parser)
+    # Predict validation dataset setting
+    parser.add_argument("--predict_steps",
+                        type=int,
+                        default=-1,
+                        help="Predict file after steps.")
+    parser.add_argument("--predict_max_new_tokens",
+                        type=int,
+                        default=512,
+                        help="Max new tokens while predicting.")
+    parser.add_argument("--predict_batch_size",
+                        type=int,
+                        default=16,
+                        help="Batch size while predicting.")
+    parser.add_argument("--predict_file",
+                        type=str,
+                        default='',
+                        help="Path of the file to be predicted.")
     args = parser.parse_args()
+
 
     # Validate settings
     if args.gradient_checkpointing and args.lora_dim > 0:

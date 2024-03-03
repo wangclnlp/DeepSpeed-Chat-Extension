@@ -313,6 +313,10 @@ def parse_args():
     parser.add_argument('--shuffle_reward_score_randomly',
                         action='store_true',
                         help='Shuffle reward scores randomly.')
+    parser.add_argument('--gamma',
+                        type=float,
+                        default=0.95,
+                        help='Reward decay factor.')
     ## Remove KL penalty
     parser.add_argument('--remove_kl_penalty',
                         action='store_true',
@@ -322,6 +326,32 @@ def parse_args():
     parser.add_argument('--dynamic_sampling',
                         action='store_true',
                         help='Enable Dynamic Sampling.')
+
+    ## Iterative Alignment
+    parser.add_argument('--iterative_alignment',
+                        action='store_true',
+                        help='Enable Iteractive Alignment.')
+    parser.add_argument('--previous_sft_model',
+                        type=str,
+                        help='model path of the previous sft model; compute the fisher for EWC.')
+    parser.add_argument('--previous_round_after_sft_model',
+                        type=str,
+                        help='model path of the previous round model after sft.')
+    parser.add_argument('--previous_round_after_rlhf_model',
+                        type=str,
+                        help='model path of the previous round model after rlhf.')
+    parser.add_argument('--lamda_factor',
+                        type=float,
+                        default=1.0,
+                        help='rl_loss + ewc_loss * lamda_factor')
+    parser.add_argument('--ewc_max_weight',
+                        type=float,
+                        default=100.0,
+                        help='Set max weight in  EWC.')
+    parser.add_argument('--ewc_mse_factor',
+                        type=float,
+                        default=1e10,
+                        help='(sft_model-previous_sft_model).mean()*ewc_mse_factor')
 
     ## Add SFT loss
     parser.add_argument('--add_sft_loss',
@@ -337,15 +367,15 @@ def parse_args():
     ## Factor of sft loss and rl loss
     parser.add_argument('--factor_rl_loss',
                         type=float,
-                        default=0.7,
+                        default=0,
                         help='factor_rl_loss*loss_rl if add_sft_loss or add_pretrained_loss')
     parser.add_argument('--factor_sft_loss',
                         type=float,
-                        default=0.15,
+                        default=0,
                         help='+= factor_sft_loss*loss_sft if add_sft_loss')
     parser.add_argument('--factor_pretrained_loss',
                         type=float,
-                        default=0.15,
+                        default=0,
                         help='+= factor_pretrained_loss*loss_pretrained if add_pretrained_loss')
 
     ## use the annotated scores to training the reward model. Note: argment confiting, don't set it!
@@ -363,8 +393,10 @@ def parse_args():
                         type=bool,
                         default=True,
                         help='Standardizing reward scores within a batch.')
-
-
+    parser.add_argument('--whiten_critic_values',
+                        type=bool,
+                        default=True,
+                        help='Standardizing critic values within a batch.')
 
     ## Use comet models to reward LLM; Note that it is a list type
     parser.add_argument('--use_comet_model',
@@ -385,12 +417,33 @@ def parse_args():
                         help='set a cuda device for each comet model. Hint: we can set same device for all comet models.')
     parser.add_argument('--reward_queue_size',
                         type=int,
-                        default=20,
+                        default=1000,
                         help='set the size of reward queue.')
     parser.add_argument('--batch_reward_weight',
                         type=bool,
                         default=True,
                         help='if use the batch reward weight; otherwrise, use the sample level reward weight.')
+    parser.add_argument('--comet_model_require_reference',
+                        type=bool,
+                        default=False,
+                        help='comet_model_require_reference')
+    # Predict validation dataset setting
+    parser.add_argument("--predict_steps",
+                        type=int,
+                        default=-1,
+                        help="Predict file after steps.")
+    parser.add_argument("--predict_max_new_tokens",
+                        type=int,
+                        default=512,
+                        help="Max new tokens while predicting.")
+    parser.add_argument("--predict_batch_size",
+                        type=int,
+                        default=16,
+                        help="Batch size while predicting.")
+    parser.add_argument("--predict_file",
+                        type=str,
+                        default='',
+                        help="Path of the file to be predicted.")
 
     parser = deepspeed.add_config_arguments(parser)
     args = parser.parse_args()

@@ -4,7 +4,9 @@
 # DeepSpeed Team
 import time
 import torch
+import os
 import deepspeed
+from deepspeed import get_accelerator
 from deepspeed.ops.adam import FusedAdam
 from deepspeed.ops.adam import DeepSpeedCPUAdam
 from transformers import AutoModelForCausalLM, get_scheduler
@@ -12,7 +14,7 @@ from transformers import AutoModelForCausalLM, get_scheduler
 from rlhf_llama.deepspeed_chat.training.utils.ds_utils import get_train_ds_config, get_eval_ds_config
 from rlhf_llama.deepspeed_chat.training.utils.module.lora import convert_linear_layer_to_lora, only_optimize_lora_parameters
 from rlhf_llama.deepspeed_chat.training.utils.model.model_utils import create_hf_model, create_critic_model
-from rlhf_llama.deepspeed_chat.training.utils.utils import get_optimizer_grouped_parameters
+from rlhf_llama.deepspeed_chat.training.utils.utils import get_optimizer_grouped_parameters, print_rank_0
 from rlhf_llama.deepspeed_chat.training.utils.ewc import EWC
 """
 TODOs:
@@ -48,21 +50,34 @@ class DeepSpeedRLHFEngine():
         if reward_model_name_or_path == None:
             print('Using critice_model_name_or_path as reward_model_name_or_path')
             reward_model_name_or_path = critic_model_name_or_path
-        if reward_tokenizer == None:
-            raise "Need reward tokenizer!"
-        else:
-            self.reward_tokenizer = reward_tokenizer
+            
+        # if reward_tokenizer == None:
+        #     raise "Need reward tokenizer!"
+        # else:
+        self.reward_tokenizer = reward_tokenizer
 
         if self.args.iterative_alignment:
-            self.ewc = EWC(self.args.lamda_factor, self.args.ewc_max_weight)
-            # load previous sft model
-            previous_sft_model = self._init_actor(
-                actor_model_name_or_path=self.args.previous_sft_model, if_previous_sft_model=True)
+            import os
+            self.ewc = EWC(args.lamda_factor, args.ewc_max_weight)
+            print_rank_0("extract parameters of the previous rlhf model..................................")
             previous_parameters_dict = {}
-            for n, p in previous_sft_model.named_parameters():
-                previous_parameters_dict[n.replace("module.", "")] = p.detach().cpu().clone()
+            if "base" in self.args.previous_sft_model:
+                for bin_path in os.listdir(self.args.previous_sft_model):
+                    if "0000" in bin_path:
+                        previous_parameters_dict_sub = torch.load(self.args.previous_sft_model+"/"+bin_path,  map_location='cpu')
+                        previous_parameters_dict.update(previous_parameters_dict_sub)
+            else:
+                previous_parameters_dict = torch.load(self.args.previous_sft_model+"/pytorch_model.bin",  map_location='cpu')
 
-            del previous_sft_model
+            print_rank_0("extract parameters of the current model..................................")
+            current_model_parameters_dict = {}
+            if "base" in actor_model_name_or_path:
+                for bin_path in os.listdir(actor_model_name_or_path):
+                    if "0000" in bin_path:
+                        current_model_parameters_dict_sub = torch.load(actor_model_name_or_path+"/"+bin_path,  map_location='cpu')
+                        current_model_parameters_dict.update(current_model_parameters_dict_sub)
+            else:
+                current_model_parameters_dict = torch.load(actor_model_name_or_path+"/pytorch_model.bin",  map_location='cpu')
 
         self.actor = self._init_actor(
             actor_model_name_or_path=actor_model_name_or_path)
@@ -70,42 +85,56 @@ class DeepSpeedRLHFEngine():
         if self.args.iterative_alignment:
             # check if the fisher from the previous round exists.
             import os
+            print_rank_0("compute the fisher..................................")
             if os.path.exists(f"{self.args.previous_round_after_sft_model}/previous_fisher.bin"):
                 previous_fisher = torch.load(f"{self.args.previous_round_after_sft_model}/previous_fisher.bin")
                 self.ewc.fisher = previous_fisher
                 # compute the fisher number
-                for n, p in self.actor.named_parameters():
-                    # solve it with GatheredParameters function.
-                    with deepspeed.zero.GatheredParameters(p, modifier_rank=0):
-                        fp = p.detach().cpu().clone()
-                        previous_fp = previous_parameters_dict[n.replace("module.", "")]
-
-                        # compute the different between sft model and previous sft model.
-                        self.ewc.fisher[n.replace("module.", "")] += ((fp - previous_fp) ** 2).mean().item()*self.args.ewc_mse_factor
-
+                for n in current_model_parameters_dict.keys():
+                    fp = current_model_parameters_dict[n.replace("module.", "")]
+                    previous_fp = previous_parameters_dict[n.replace("module.", "")]
+                    # compute the different between rlhf model and previous rlhf model.
+                    self.ewc.fisher[n.replace("module.", "")] += (((fp - previous_fp)*self.args.ewc_mse_factor) ** 2).mean().item()
             else:
                 # compute the fisher number
-                for n, p in self.actor.named_parameters():
-                    # solve it with GatheredParameters function.
-                    with deepspeed.zero.GatheredParameters(p, modifier_rank=0):
-                        fp = p.detach().cpu().clone()
-                        previous_fp = previous_parameters_dict[n.replace("module.", "")]
+                for n in current_model_parameters_dict.keys():
+                    fp = current_model_parameters_dict[n.replace("module.", "")]
+                    previous_fp = previous_parameters_dict[n.replace("module.", "")]
+                    # compute the different between sft model and previous sft model.
+                    # from rlhf_llama.deepspeed_chat.training.utils import pdb ; pdb.set_trace()
+                    self.ewc.fisher[n.replace("module.", "")] = (((fp - previous_fp)*self.args.ewc_mse_factor) ** 2).mean().item()
 
-                        # compute the different between sft model and previous sft model.
-                        self.ewc.fisher[n.replace("module.", "")] = ((fp - previous_fp) ** 2).mean().item()*self.args.ewc_mse_factor
-            
-            # saving the fisher in this round
+            # <--baseline method(HAT-Freeze): freezing parameters--begin>
+            using_hat_freeze = False
+            if using_hat_freeze:
+                freeze_rate = 0.2
+                sorted_fisher = dict(sorted(self.ewc.fisher.items(), key=lambda item: item[1], reverse=True))
+                select_freeze_parameter = list(sorted_fisher.keys())[:int(len(sorted_fisher) * freeze_rate)] 
+
+                for n, p in self.actor.named_parameters():
+                    if n.replace("module.", "") in select_freeze_parameter:
+                        p.requires_grad = False
+            # <--baseline method(HAT-Freeze): freezing parameters--end>
+
+            # save the fisher in this round
             torch.save(self.ewc.fisher, f"{actor_model_name_or_path}/previous_fisher.bin")
-                    
             # using softmax to normalize the fisher
             norm_values = torch.softmax(torch.Tensor(list(self.ewc.fisher.values())), dim=-1)
-            # random method
-            random_fisher_value = torch.rand_like(norm_values)
-            norm_values = torch.softmax(random_fisher_value, dim=-1)
+
+
+            # <--baseline method(HAT-Random): random weights--begin>
+            using_hat_random = False
+            if using_hat_random:
+                random_fisher_value = torch.rand_like(norm_values)
+                norm_values = torch.softmax(random_fisher_value, dim=-1)
+            # <--baseline method(HAT-Random): random weights--end>
 
             self.ewc.fisher = dict(zip(self.ewc.fisher.keys(), norm_values.tolist()))
-            
+
+            print_rank_0("end...delete parameters dict..................................")
             del previous_parameters_dict
+            self.ewc.reference_model_parameters = current_model_parameters_dict
+            # del current_model_parameters_dict
             import gc
             gc.collect()
 
@@ -117,20 +146,12 @@ class DeepSpeedRLHFEngine():
             self.reward = self._init_reward(
                 reward_model_name_or_path=reward_model_name_or_path)
         else:
-            self.reward = self.load_comet_reward_model(self.args.comet_model_path, self.args.devices_comet_model)
+            self.reward = self.load_comet_reward_model(
+                self.args.comet_model_path, self.args.devices_comet_model, local_rank=args.local_rank)
 
         if not self.args.remove_kl_penalty:
             self.ref = self._init_ref(
                 actor_model_name_or_path=actor_model_name_or_path)
-
-        if self.args.iterative_alignment:
-            # create reference model parameters
-            for n, p in self.ref.named_parameters():
-                # solve it with GatheredParameters function.
-                with deepspeed.zero.GatheredParameters(p, modifier_rank=0):
-                    fp = p.detach().cpu().clone()
-
-                    self.ewc.reference_model_parameters[n.replace("module.", "")] = fp
 
         self.actor_ema = None
         if self.args.enable_ema:
@@ -140,7 +161,7 @@ class DeepSpeedRLHFEngine():
         if (not args.remove_critic_model) and self.args.critic_gradient_checkpointing:
             self.critic.gradient_checkpointing_enable()
 
-    def load_comet_reward_model(self, comet_model_path, devices_comet_model):
+    def load_comet_reward_model(self, comet_model_path, devices_comet_model, local_rank):
         import os
         from comet import load_from_checkpoint
 
@@ -149,10 +170,20 @@ class DeepSpeedRLHFEngine():
         import logging
         logging.getLogger("pytorch_lightning").setLevel(logging.WARNING)
         reward_models = []
-        for model_path, device in zip(comet_model_path, devices_comet_model):
+
+        # get device
+        if local_rank == -1:
+            device = torch.device(get_accelerator().device_name())
+        else:
+            get_accelerator().set_device(local_rank)
+            device = torch.device(get_accelerator().device_name(), local_rank)
+
+        # for model_path, device in zip(comet_model_path, devices_comet_model):
+        for model_path in comet_model_path:  # single comet model.
             assert (os.path.exists(model_path)), "Invalid path of Comet reward model!"
             reward_model = load_from_checkpoint(model_path)
-            reward_model.to(f"cuda:{device}")
+            reward_model.to(device)
+            # reward_model = reward_model.half()
             reward_model.eval()
             reward_models.append(reward_model)
 
@@ -223,7 +254,6 @@ class DeepSpeedRLHFEngine():
         )
 
         # DeepSpeed Engine
-        #TODO: move enable_hybrid_engine and pin_parameters to ds_config
         actor_engine, *_ = deepspeed.initialize(model=actor_model,
                                                 optimizer=optim,
                                                 lr_scheduler=lr_scheduler,
@@ -246,7 +276,6 @@ class DeepSpeedRLHFEngine():
                                        stage=zero_stage)
         ds_config[
             'train_micro_batch_size_per_gpu'] = self.args.per_device_mini_train_batch_size
-        #TODO(jeff): we should probably set grad accumlation steps here as well for clarity
         ds_config[
             'train_batch_size'] = self.args.per_device_mini_train_batch_size * torch.distributed.get_world_size(
             ) * self.args.gradient_accumulation_steps_actor
@@ -276,7 +305,6 @@ class DeepSpeedRLHFEngine():
                                        stage=zero_stage)
         ds_config[
             'train_micro_batch_size_per_gpu'] = self.args.per_device_mini_train_batch_size
-        #TODO(jeff): we should probably set grad accumlation steps here as well for clarity
         ds_config[
             'train_batch_size'] = self.args.per_device_mini_train_batch_size * torch.distributed.get_world_size(
             ) * self.args.gradient_accumulation_steps_actor
@@ -305,7 +333,6 @@ class DeepSpeedRLHFEngine():
                                         stage=self.args.critic_zero_stage)
         ds_config[
             'train_micro_batch_size_per_gpu'] = self.args.per_device_mini_train_batch_size
-        #TODO(jeff): we should probably set grad accumlation steps here as well for clarity
         ds_config[
             'train_batch_size'] = self.args.per_device_mini_train_batch_size * torch.distributed.get_world_size(
             ) * self.args.gradient_accumulation_steps
@@ -313,8 +340,6 @@ class DeepSpeedRLHFEngine():
         ds_config['gradient_accumulation_steps'] = self.args.gradient_accumulation_steps
         # ds_config['wall_clock_breakdown'] = False
 
-        #TODO(jeff): should not be needed, we should be able to use ds_config above
-        #TODO(jeff): it means we never create the critic w. zero.init context if we are using ZeRO-3
         #However, do not use this ds_eval_config during the init process. 
         ds_eval_config = get_eval_ds_config(offload=False, dtype=self.args.dtype, stage=0)
 
@@ -378,8 +403,6 @@ class DeepSpeedRLHFEngine():
             'train_batch_size'] = self.args.per_device_mini_train_batch_size * torch.distributed.get_world_size(
             ) * self.args.gradient_accumulation_steps
 
-        #TODO(jeff): should not be needed, we should be able to use ds_config above
-        #TODO(jeff): it means we never create the reward w. zero.init context if we are using ZeRO-3
         ds_eval_config = get_eval_ds_config(offload=False, stage=0)
 
         # Model

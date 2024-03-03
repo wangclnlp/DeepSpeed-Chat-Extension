@@ -44,6 +44,7 @@ from rlhf_llama.deepspeed_chat.training.utils.data.data_utils import create_prom
 from rlhf_llama.deepspeed_chat.training.utils.utils import print_rank_0, to_device, save_hf_format, set_random_seed, get_all_reduce_mean, moving_average, save_zero_three_model, load_hf_tokenizer
 from rlhf_llama.deepspeed_chat.training.utils.module.lora import convert_lora_to_linear_layer
 from rlhf_llama.deepspeed_chat.training.utils import datetime_utils
+from rlhf_llama.deepspeed_chat.training.utils.predict import Predict
 
 
 def create_datasets(args, tokenizer, train_phase=3):
@@ -170,7 +171,7 @@ def main():
         reward_tokenizer.add_eos_token = True 
         reward_tokenizer.padding_side = 'right'
     else:
-        reward_tokenizer = None 
+        reward_tokenizer = None
 
     prompt_train_dataloader, unsupervised_train_dataloader, num_total_iters = create_datasets(
         args=args, tokenizer=tokenizer, train_phase=3)
@@ -279,8 +280,8 @@ def main():
 
                     random.shuffle(exp_dataset)
                     random.shuffle(unsup_dataset)
-
-                average_reward = get_all_reduce_mean(average_reward).item()
+                if not args.use_comet_model:
+                    average_reward = get_all_reduce_mean(average_reward).item()
                 print_rank_0(
                     f'epoch: {epoch}|step: {global_step}|act_loss: {actor_loss_sum/inner_iter}|cri_loss: {critic_loss_sum/inner_iter}'
                     f'|unsuper_loss: {unsup_loss_sum/inner_iter}|average reward score: {average_reward/inner_iter}|'
@@ -363,6 +364,27 @@ def main():
                             WEIGHTS_NAME = "pytorch_model.bin"
                             output_model_file = os.path.join(save_dir, WEIGHTS_NAME)
                             torch.save(lean_state_dict, output_model_file)
+                    
+                    if args.whiten_rewards:
+                        saved_reward_whiten_queue = f"{args.output_dir}/previous_reward_whiten_queue.bin"
+                        torch.save(trainer.reward_whiten_queue, saved_reward_whiten_queue)
+                    if args.whiten_critic_values:
+                        saved_advantage_whiten_queue = f"{args.output_dir}/previous_advantage_whiten_queue.bin"
+                        torch.save(trainer.advantage_whiten_queue, saved_advantage_whiten_queue)
+
+            with torch.no_grad():
+                if args.predict_steps != -1 and global_step % args.predict_steps == 0:
+                    old_tokenizer_padding_side = tokenizer.padding_side
+                    tokenizer.padding_side = 'left'
+                    predict_output = os.path.join(args.output_dir, 'predicts', f'epoch_{epoch}_step_{global_step}.txt')
+                    if args.local_rank in [-1, 0]:
+                        if not os.path.exists(os.path.dirname(predict_output)):
+                            os.makedirs(os.path.dirname(predict_output))
+                    print_rank_0("Predicting...")
+                    assert os.path.exists(args.predict_file)
+                    Predict(args.predict_max_new_tokens, args.predict_file, 0.75, 0.95, \
+                            args.predict_batch_size, predict_output, local_rank=args.local_rank).predict(rlhf_engine.actor, device, tokenizer)
+                    tokenizer.padding_side = old_tokenizer_padding_side
 
     if args.output_dir is not None:
         print_rank_0('saving final model ...')
@@ -434,6 +456,13 @@ def main():
                 WEIGHTS_NAME = "pytorch_model.bin"
                 output_model_file = os.path.join(save_dir, WEIGHTS_NAME)
                 torch.save(lean_state_dict, output_model_file)
+
+        if args.whiten_rewards:
+            saved_reward_whiten_queue = f"{args.output_dir}/previous_reward_whiten_queue.bin"
+            torch.save(trainer.reward_whiten_queue, saved_reward_whiten_queue)
+        if args.whiten_critic_values:
+            saved_advantage_whiten_queue = f"{args.output_dir}/previous_advantage_whiten_queue.bin"
+            torch.save(trainer.advantage_whiten_queue, saved_advantage_whiten_queue)
 
 if __name__ == "__main__":
     main()

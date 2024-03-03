@@ -14,7 +14,7 @@ from deepspeed.runtime.zero.partition_parameters import ZeroParamStatus
 
 
 def print_rank_0(msg, rank=0):
-    if rank <= 0:
+    if rank <= 0 and torch.distributed.get_rank() <= 0:
         print(msg)
 
 

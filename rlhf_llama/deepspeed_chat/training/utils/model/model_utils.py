@@ -84,7 +84,7 @@ def create_critic_model(model_name_or_path,
                         is_reward=False):
     # OPT model family always put a padding token at the beginning of the sequence,
     # we did not see this in other models but not sure if it is a general rule
-
+ 
     import time
 
     start = time.time()
