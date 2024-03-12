@@ -71,7 +71,7 @@ Example:
 
 ## SFT with Multi-turn History
 
-The dataset for SFT with Multi-turn History should be `txt` files including `train.txt` and `test.txt`  with `sft` in path such as `/your/path/to/sft_dataset/train.txt`, containing a json string each line as example below.
+We also support sft training with multi-turn dialogues. The corresponding dataset also contains a json string on each line, as shown in the example below.
 
 Example:
 
