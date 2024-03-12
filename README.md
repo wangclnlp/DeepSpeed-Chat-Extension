@@ -69,6 +69,26 @@ Example:
 ...
 ```
 
+## SFT with Multi-turn History
+
+The dataset for SFT with Multi-turn History should be `txt` files including `train.txt` and `test.txt`  with `sft` in path such as `/your/path/to/sft_dataset/train.txt`, containing a json string each line as example below.
+
+Example:
+
+```
+{
+ "instruction": "User: Your task is to ... \nAssistant: ",
+ "input": "...",
+ "output": "...",
+ "history": [
+              ["user instruction in the first round (optional)", "model response in the first round (optional)"],
+              ["user instruction in the second round (optional)", "model response in the second round (optional)"],
+              ...
+            ]
+}
+...
+```
+
 ## Reward/DPO
 
 The dataset for Reward/DPO should be parquet files including `train.parquet` and `test.parquet` with `reward` in path such as `/your/path/to/reward_dataset/train.parquet`, containing four keys each entry as example below.
