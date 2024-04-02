@@ -1,6 +1,6 @@
 # Prior Constraints-based Reward Model Training for Aligning Large Language Models
 
-This is the code edited for paper [Prior Constraints-based Reward Model Training for Aligning Large Language Models]() based on [DeepSpeed-Chat](https://github.com/microsoft/DeepSpeedExamples) project.
+This is the code edited for paper [Prior Constraints-based Reward Model Training for Aligning Large Language Models](https://arxiv.org/abs/2404.00978) based on [DeepSpeed-Chat](https://github.com/microsoft/DeepSpeedExamples) project.
 
 - Abstract
 
