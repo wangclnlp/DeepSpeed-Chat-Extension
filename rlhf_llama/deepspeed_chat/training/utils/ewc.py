@@ -1,7 +1,5 @@
 import torch.nn as nn
 import torch
-import deepspeed
-from rlhf_llama.deepspeed_chat.training.utils.utils import to_device
 
 class EWC():
     def __init__(self, lamda_factor, max_weight=10, train_dataloader=None):
@@ -26,16 +24,12 @@ class EWC():
             if not torch.is_tensor(ref_p):
                 ref_p = torch.Tensor(ref_p)
 
-            # solve it with GatheredParameters function.
-            # with deepspeed.zero.GatheredParameters(p, modifier_rank=0):
             if p.numel() and p.requires_grad:
-                # from rlhf_llama.deepspeed_chat.training.utils import pdb ; pdb.set_trace()
                 # ewc_losses.append((self.fisher[n] * (p - ref_p.to(p.device)).pow(2)).sum())
                 if apply_original_ewc:
                     ewc_loss += (self.fisher_matrix[n.replace("module.", "")] * self.max_weight * ((p - ref_p.to(p.device))*self.ewc_lambda).pow(2)).sum()
                 else:
                     ewc_loss += (self.fisher[n.replace("module.", "")] * self.max_weight * ((p - ref_p.to(p.device))*self.ewc_lambda).pow(2)).sum()
-                # from rlhf_llama.deepspeed_chat.training.utils import pdb ; pdb.set_trace()
 
         return ewc_loss
 
