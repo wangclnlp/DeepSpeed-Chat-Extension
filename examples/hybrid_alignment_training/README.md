@@ -1,7 +1,5 @@
 # Hybrid Alignment Training for Large Language Models
 
-paper: ***arxiv link***
-
 ## Abstract
 
 Alignment training is crucial for enabling large language models (LLMs) to cater to human intentions and preferences. It is typically performed based on two stages with different objectives: instruction-following alignment and human-preference alignment. However, aligning LLMs with these objectives in sequence suffers from an inherent problem: the objectives may conflict, and the LLMs cannot guarantee to simultaneously align with the instructions and human preferences well. To response to these, in this work, we propose a Hybrid Alignment Training (HBAT) approach, based on alternating alignment and modified elastic weight consolidation methods. The basic idea is to alternate between different objectives during alignment training, so that better collaboration can be achieved between the two alignment tasks.  We experiment with HBAT on summarization and dialogue tasks. Experimental results show that HBAT can outperform all baselines. Notably, HBAT yields consistent performance gains over the traditional two-stage alignment training when using both proximal policy optimization and direct preference optimization.
@@ -50,4 +48,15 @@ ewc_loss = ewc.compute_ewc_loss(model, apply_original_ewc=args.apply_original_ew
 if ewc_loss != 0:
     model.backward(ewc_loss)
     loss += ewc_loss.item()
+```
+
+## Citation
+
+```
+@article{wang2024hybrid,
+  title={Hybrid Alignment Training for Large Language Models},
+  author={Wang, Chenglong and Zhou, Hang and Chang, Kaiyan and Li, Bei and Mu, Yongyu and Xiao, Tong and Liu, Tongran and Zhu, Jingbo},
+  journal={arXiv preprint arXiv:2406.15178},
+  year={2024}
+}
 ```

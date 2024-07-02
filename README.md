@@ -1,7 +1,7 @@
 We have edited the code of project [DeepSpeed-Chat](https://github.com/microsoft/DeepSpeedExamples/tree/master/applications/DeepSpeed-Chat) to support many new features as shown below.
 
 # Our New Features🎉🎉🎉
-
+- We propose a hybrid alignment training to improve the LLM ([./examples/hybrid_alignment_training](https://github.com/wangclnlp/DeepSpeed-Chat-Extension/tree/main/examples/hybrid_alignment_training)).
 - Add extra loss for RLHF in step3 like SFT loss and pre-trained loss ([./examples/add_extra_loss_for_rlhf](./examples/add_extra_loss_for_rlhf)).
 - Support [DPO](https://arxiv.org/abs/2305.18290) as step2 ([./examples/dpo](./examples/dpo)).
 - Implement [ESRL](https://arxiv.org/abs/2308.02223) features to train efficiently in step3 ([./examples/esrl](./examples/esrl)).
